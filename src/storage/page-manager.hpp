@@ -217,22 +217,61 @@ public:
   // Find the slot with the minimum key s.t. key >= "key" in argument.
   // If this slot doesn't exist, return SlotNum().
   slotid_t LowerBound(std::string_view key) const {
-    DB_ERR("Not implemented yet!");
+    if IsEmpty(){
+      return SlotNum();
+    }
+    slotid_t start = 0;
+    slotid_t end = SlotNum();
+    return LowerBoundAddable(start, end, key, slot_key_comp_);
+    // DB_ERR("Not implemented yet!");
   }
   // Find the slot with the minimum key s.t. key > "key" in argument
   // If this slot doesn't exist, return SlotNum().
   slotid_t UpperBound(std::string_view key) const {
-    DB_ERR("Not implemented yet!");
+    if IsEmpty(){
+      return SlotNum();
+    }
+    slotid_t start = 0;
+    slotid_t end = SlotNum();
+    return UpperBoundAddable(start, end, key, slot_key_comp_);
+    // DB_ERR("Not implemented yet!");
   }
   // Find the key and return the slot ID.
   // If this key doesn't exist, return SlotNum().
   slotid_t Find(std::string_view key) const {
-    DB_ERR("Not implemented yet!");
+    slotid_t start = 0;
+    slotid_t end = SlotNum();
+    while (start != end) {
+    slotid_t mid = start + (end - start) / 2;
+    if (slot_key_comp_(mid, key) == std::weak_ordering::equivalent) {
+      return mid;
+    } else if (slot_key_comp_(mid, key) == std::weak_ordering::greater) {
+      end = mid;
+    } else {
+      start = mid + 1
+    }
+  }
+  return SlotNum();
+    
+    // DB_ERR("Not implemented yet!");
   }
   // Find the key and return the slot.
   // If the key is not found, return std::nullopt.
   std::optional<std::string_view> FindSlot(std::string_view key) const {
-    DB_ERR("Not implemented yet!");
+    slotid_t start = 0;
+    slotid_t end = SlotNum();
+    while (start != end) {
+      slotid_t mid = start + (end - start) / 2;
+      if (slot_key_comp_(mid, key) == std::weak_ordering::equivalent) {
+        return Slot(mid);
+      } else if (slot_key_comp_(mid, key) == std::weak_ordering::greater) {
+        end = mid;
+      } else {
+        start = mid + 1
+      }
+    }
+  return std::nullopt;
+    // DB_ERR("Not implemented yet!");
   }
   /* Append the slot as the last slot of this page without checking whether the
    * page will overflow.
@@ -252,7 +291,34 @@ public:
    * Return succeed or not.
    */
   inline bool InsertBeforeSlot(slotid_t slotid, std::string_view slot) {
-    DB_ERR("Not implemented yet!");
+    if (!IsInsertable(slot)){
+      return false;
+    }
+    if (slot_comp_(slot, Slot(slotid))!=std:weak_ordering::less)
+      {
+        return false;
+      }
+    if (slot_comp_(slot, Slot(slotid-1))!=std:weak_ordering::greater)
+      {
+        return false;
+      }
+    MarkDirty();
+    for (int i = SlotNum(); i > slotid; i--)
+    {      
+      StartsMut()[i] = Starts()[i-1] - slot.size();
+      EndsMut()[i] = Ends()[i-1] - slot.size();
+      std::string_view end_slot = Slot(i-1);
+      memcpy(page_ + Starts()[i-1] - slot.size(), end_slot.data(), end_slot.size());
+    }
+  
+    pgoff_t tail_offset = Ends()[slotid];
+    pgoff_t start = tail_offset - slot.size();
+    memcpy(page_ + start, slot.data(), slot.size());
+    StartsMut()[slotid] = start;
+    // EndsMut()[slotid] = start + slot.size()
+    SlotNumMut() += 1;
+    return true;
+    // DB_ERR("Not implemented yet!");
   }
   /* Logically equivalent to inserting the slot before the given slot, and then
    *  split the right half of the overflowed page into the empty page "right".
@@ -263,10 +329,73 @@ public:
    *	true: Succeed.
    *	false: If insert the slot, there will be no way to split the resulting
    *		page into two pages without overflow.
+   * 左边overflow的时候才调用
    */
+
   bool SplitInsert(SortedPage<SlotKeyCompare, SlotCompare>& right,
       std::string_view slot, slotid_t slotid) {
-    DB_ERR("Not implemented yet!");
+    MarkDirty();
+    if (slot_comp_(slot, Slot(slotid))!=std:weak_ordering::less)
+      {
+        return false;
+      }
+    if (slot_comp_(slot, Slot(slotid-1))!=std:weak_ordering::greater)
+      {
+        return false;
+      }
+    slotid_t start = 0;
+    slotid_t end = SlotNum();
+    inline pgoff_t s1 = SlotsSpace(start, end); // Ends()[0] - Starts()[SlotNum()-1];
+    inline pgoff_t smid = (s1 + slot.size()) / 2;
+    slotid_t edge = 0;
+    while (start != end) {
+      slotid_t mid = start + (end - start) / 2;
+      if (mid >= slotid)
+      {
+        if ( smid > SlotsSpace(0, mid) + slot.size() ) {
+          start = mid + 1;
+        } else if (smid < SlotsSpace(0, mid) + slot.size()) {
+          end = mid;
+        } else {
+          edge = mid;
+        }
+      }else{
+        if ( smid > SlotsSpace(0, mid) ) {
+          start = mid + 1;
+        } else if (smid < SlotsSpace(0, mid)) {
+          end = mid;
+        } else {
+          edge = mid;
+        }
+      } 
+    }
+    edge = end;
+    for (int i = 0; i < edge; i++)
+    {
+      if (i == slotid){
+        if (!right.IsInsertable(slot)){
+          return InsertBeforeSlot(0,slot);
+        } 
+        right.AppendSlotUnchecked(slot);
+      } else {
+        if (!right.IsInsertable(Slot(0))){
+          if (i<slotid)
+          {
+            return InsertBeforeSlot(slotid-i,slot);
+          } else{
+            return true;
+          }
+        }
+        right.AppendSlotUnchecked(Slot(0));
+        DeleteSlot(0);
+      }
+    }
+    if (edge <= slotid)
+    {
+      return InsertBeforeSlot(slotid-edge, slot);
+    }
+    
+    // DB_ERR("Not implemented yet!");
   }
   /* Logically equivalent to replacing the given slot, and then split the right
    *  half of the overflowed page into the empty page "right".
@@ -279,17 +408,35 @@ public:
    */
   bool SplitReplace(SortedPage<SlotKeyCompare, SlotCompare>& right,
       std::string_view slot, slotid_t slotid) {
-    DB_ERR("Not implemented yet!");
+    DeleteSlot(slotid);
+    SplitInsert(right, slot, slotid);
+    // DB_ERR("Not implemented yet!");
   }
 
   // Delete the slot specified by slot ID.
   void DeleteSlot(slotid_t slot_id) {
-    DB_ERR("Not implemented yet!");
+    MarkDirty();
+    std::string_view slot = Slot(slot_id);
+    for (int i = slot_id; i < SlotNum()-1; i++)
+    {
+      StartsMut()[i] = Starts()[i+1] + slot.size();
+      EndsMut()[i] = Ends()[i+1] + slot.size();
+      std::string_view d_slot = Slot(i+1);
+      memcpy(page_ + Starts()[i+1] + slot.size(), d_slot.data(), d_slot.size());
+    }
+    SlotNumMut() -= 1;
+    // DB_ERR("Not implemented yet!");
   }
   // Delete the slot specified by the key.
   // Return whether the deletion is successful or not.
   bool DeleteSlotByKey(std::string_view key) {
-    DB_ERR("Not implemented yet!");
+    if (Find(key)==SlotNum()){
+      return false;
+    }
+    slotid_t slot_id = Find(key);
+    DeleteSlot(slot_id);
+    return true;
+    // DB_ERR("Not implemented yet!");
   }
 private:
   // Some helper classes/functions that you may adopt.
@@ -535,17 +682,13 @@ public:
 
   // Made public for test
   inline pgid_t& PageNum() {
-    return *(pgid_t *)(buf_[0].addr_mut() + PAGE_NUM_OFF);
+    return *(pgid_t *)(buf_[0].addr + PAGE_NUM_OFF);
   }
   // For test
   void ShrinkToFit();
 private:
   struct PageBufInfo {
-    const char *addr() const {
-      return reinterpret_cast<const char *>(buf.get());
-    }
-    char *addr_mut() { return reinterpret_cast<char *>(buf.get()); }
-    std::unique_ptr<char[]> buf;
+    char *addr;
     size_t refcount;
     bool dirty;
   };
@@ -566,13 +709,11 @@ private:
   static constexpr pgoff_t FREE_PAGES_IN_HEAD = FREE_LIST_HEAD_OFF + sizeof(pgid_t);
   static constexpr pgoff_t PAGE_NUM_OFF = FREE_PAGES_IN_HEAD + sizeof(pgid_t);
   inline pgid_t& FreeListHead() {
-    return *(pgid_t *)(buf_[0].addr_mut() + FREE_LIST_HEAD_OFF);
+    return *(pgid_t *)(buf_[0].addr + FREE_LIST_HEAD_OFF);
   }
   inline pgid_t& FreePagesInHead() {
-    return *(pgid_t *)(buf_[0].addr_mut() + FREE_PAGES_IN_HEAD);
+    return *(pgid_t *)(buf_[0].addr + FREE_PAGES_IN_HEAD);
   }
-
-  pgid_t __Allocate();
 
   void AllocMeta();
   void Init();

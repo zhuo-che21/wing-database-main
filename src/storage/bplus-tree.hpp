@@ -93,23 +93,38 @@ class BPlusTree {
    public:
     Iter(const Iter&) = delete;
     Iter& operator=(const Iter&) = delete;
-    Iter(Iter&& iter) {
-      DB_ERR("Not implemented!");
+    Iter(Iter&& iter) :page_id_(iter.page_id_), slot_id_(iter.slot_id_) {
+      // DB_ERR("Not implemented!");
     }
     Iter& operator=(Iter&& iter) {
-      DB_ERR("Not implemented!");
+      page_id_ = iter.page_id_;
+      slot_id_ = iter.slot_id_; 
+      return *this;
+      // DB_ERR("Not implemented!");
     }
-    // Returns the current key-value pair that this iterator currently points
-    // to. If this iterator does not point to any key-value pair, then return
-    // std::nullopt. The first std::string_view is the key and the second
-    // std::string_view is the value.
+    // Returns an optional key-value pair. The first std::string_view is the key
+    // and the second std::string_view is the value.
     std::optional<std::pair<std::string_view, std::string_view>> Cur() {
-      DB_ERR("Not implemented!");
+      LeafPage leaf_p = GetLeafPage(page_id_);
+      std::string_view content = leaf_p.Slot(slot_id_);
+      LeafSlot s = LeafSlotParse(content);
+      return std::make_optional(std::make_pair(s.key, s.value));
+      // return std::make_optional(s);
+      // DB_ERR("Not implemented!");
     }
-    // Make this iterator point to the next key-value pair, or make this
-    // iterator point to nothing if the current key-value pair is the last.
     void Next() {
-      DB_ERR("Not implemented!");
+      LeafPage leaf = GetLeafPage(page_id_);
+      if (slot_id_ >= leaf.Slotnum() )
+      {
+        page_id_ = GetLeafNext(leaf);
+        if (GetLeafNext(leaf)==0)
+        {
+          return;
+        }
+        slot_id_ = 0;
+      }
+      slot_id_ = slot_id_ + 1;
+      // DB_ERR("Not implemented!");
     }
    private:
   };
@@ -136,8 +151,13 @@ class BPlusTree {
    */
   static Self Create(std::reference_wrapper<PageManager> pgm) {
     Self ret(pgm, pgm.get().Allocate(), Compare());
+    auto root = ret.AllocLeafPage();
+    pgid_t root_id = root.ID();
+    ret.UpdateRoot(root_id);
+    ret.UpdateLevelNum(1);
+    ret.UpdateTupleNum(0);
     // Initialize the tree here.
-    DB_ERR("Not implemented!");
+    // DB_ERR("Not implemented!");
     return ret;
   }
   // Open a B+tree with its meta page ID.
@@ -149,55 +169,392 @@ class BPlusTree {
   inline pgid_t MetaPageID() const { return meta_pgid_; }
   // Free on-disk resources including the meta page.
   void Destroy() {
+    
     DB_ERR("Not implemented!");
   }
   bool IsEmpty() {
-    DB_ERR("Not implemented!");
+    return (TupleNum()==0)
+    // DB_ERR("Not implemented!");
   }
   /* Insert only if the key does not exists.
    * Return whether the insertion is successful.
    */
   bool Insert(std::string_view key, std::string_view value) {
-    DB_ERR("Not implemented!");
+    pgid_t cur = Root();
+    uint8_t level = LevelNum()-1;
+    LeafSlot leaf_s = {key, value};
+    char* addr;
+    LeafSlotSerialize(addr, leaf_s);
+    std::string_view s = std::string_view(addr, LeafSlotSize(leaf_s));
+    std::stack<std::pair<pgid_t,uint8_t>> par;
+    if (level == 0)
+    {
+      slotid_t slot_id =  GetLeafPage(cur).Find(key);
+      if (GetLeafPage(cur).IsInsertable(s))
+      {
+        return GetLeafPage(cur).InsertBeforeSlot(slot_id, s);
+      }
+      LeafPage l_next = AllocLeafPage();
+      pgid_t l_next_id = l_next.ID();
+      SetLeafPrev(GetLeafPage(cur),l_next_id);
+      SetLeafNext(l_next, cur);
+      GetLeafPage(cur).SplitInsert(l_next,s,slot_id);
+      InnerPage ro = AllocInnerPage();
+      pgid_t ro_id = ro.ID();
+      UpdateRoot(ro_id);
+      std::string_view str_upp = LeafSlotParse(GetLeafPage(cur).Slot(0)).key;
+      InnerSlot root_slot = {l_next_id,str_upp};
+      char* addr;
+      InnerSlotSerialize(addr, root_slot);
+      ro.InsertBeforeSlot(0,std::string_view(addr,InnerSlotSize(root_slot)));
+      SetInnerSpecial(ro,cur);
+      UpdateLevelNum(2);
+      return true;
+    }
+    InnerPage inn = GetInnerPage(cur);
+    while (level > 1)
+    {
+      slotid_t upper = inn.UpperBound(key);
+      if (upper == inn.SlotNum())
+      {
+        inn = GetInnerPage(GetInnerSpecial(inn));
+      }
+      else {
+        inn = GetInnerPage(InnerSlotParse(inn.Slot(upper)).next);
+      }
+      par.push(std::make_pair(inn.ID(),level));
+      level--;
+    }
+    slotid_t upper = inn.UpperBound(key);
+    LeafPage leaf = GetLeafPage(InnerSlotParse(inn.Slot(upper)).next);
+    slotid_t slot_id =  leaf.Find(key);
+    par.push(std::make_pair(leaf.ID(),level));
+    if (leaf.IsInsertable(s))
+    {
+      return leaf.InsertBeforeSlot(slot_id, s);
+    }
+    else {
+      LeafPage leaf_next = AllocLeafPage();
+      pgid_t leaf_next_id = leaf_next.ID();
+      leaf.SplitInsert(leaf_next,s,slot_id);
+      SetLeafPrev(leaf,leaf_next_id);
+      SetLeafNext(leaf_next, leaf.ID());
+      
+      std::string_view s_upper = LeafSlotParse(leaf.Slot(0)).key;
+      InnerSlot slot_next = {leaf_next_id, s_upper};
+      char* addr;
+      InnerSlotSerialize(addr, slot_next);
+      // std::string_view s_next = std::string_view(addr, InnerSlotSize(slot_next));
+      auto po = par.pop();
+      pgid_t pa = po.first;
+      uint8_t lev = po.second;
+      inn = GetInnerPage(pa);
+      slotid_t upper = inn.UpperBound(key);
+      if (inn.IsInsertable(std::string_view(addr, InnerSlotSize(slot_next))))
+      {
+        inn.InsertBeforeSlot(upper, std::string_view(addr, InnerSlotSize(slot_next))); 
+      }
+      while (!inn.IsInsertable(std::string_view(addr, InnerSlotSize(slot_next))))
+      {
+        if (lev == LevelNum()-1)
+        {
+          InnerPage i_next = AllocLeafPage();
+          pgid_t i_next_id = i_next.ID();
+          inn.SplitInsert(i_next,std::string_view(addr, InnerSlotSize(slot_next)),upper);
+          InnerPage new_ro = AllocInnerPage();
+          pgid_t new_ro_id = new_ro.ID();
+          UpdateRoot(new_ro_id);
+          std::string_view str_upp = LeafSlotParse(inn.Slot(0)).key;
+          InnerSlot root_slot = {i_next_id,str_upp};
+          char* addr;
+          InnerSlotSerialize(addr, root_slot);
+          new_ro.InsertBeforeSlot(0,std::string_view(addr,InnerSlotSize(root_slot)));
+          SetInnerSpecial(new_ro,cur);
+          UpdateLevelNum(LevelNum()+1);
+          return true;
+        }
+        InnerPage next = AllocInnerPage();
+        pgid_t next_id = next.ID();
+        auto po = par.pop();
+        uint8_t lev = po.second;
+        inn.SplitInsert(next,std::string_view(addr, InnerSlotSize(slot_next)),upper);
+        pgid_t ri = InnerSlotParse(next.Slot(next.SlotNum()-1)).next;
+        SetInnerSpecial(next, ri);
+        next.DeleteSlot(next.SlotNum()-1);
+        // SetLeafPrev(inn,next_id);
+        // SetLeafNext(next,inn.ID());
+        
+        std::string_view s_upper = InnerSmallestKey(inn,lev);
+        InnerSlot slot_next = {next_id, s_upper};
+        // char* addr;
+        InnerSlotSerialize(addr, slot_next);
+        // std::string_view s_next = std::string_view(addr, InnerSlotSize(slot_next));
+
+        pgid_t pa = po.first;
+        inn = GetInnerPage(pa);
+        slotid_t upper = inn.UpperBound(key);
+        if (inn.IsInsertable(std::string_view(addr, InnerSlotSize(slot_next))))
+        {
+          inn.InsertBeforeSlot(upper, std::string_view(addr, InnerSlotSize(slot_next)));
+        }
+      }
+    }  
+    return true;
+    // DB_ERR("Not implemented!");
   }
   /* Update only if the key already exists.
    * Return whether the update is successful.
    */
   bool Update(std::string_view key, std::string_view value) {
-    DB_ERR("Not implemented!");
+    if (Delete(key))
+    {
+      Insert(key,value);
+      return true;
+    }
+    return false;
+    // DB_ERR("Not implemented!");
   }
   // Return the maximum key in the tree.
   // If no key exists in the tree, return std::nullopt
   std::optional<std::string> MaxKey() {
-    DB_ERR("Not implemented!");
+    if (IsEmpty())
+    {
+      return std::nullopt;
+    }
+    
+    if (LevelNum()==1)
+    {
+      pgid_t root = Root();
+      LeafPage r = GetLeafPage(root);
+      return LeafLargestKey(r);
+    }
+    else {
+      pgid_t root = Root();
+      pgid_t l = LargestLeaf(GetInnerPage(root),LevelNum()-1);
+      return LeafLargestKey(GetLeafPage(l));
+    }
+    
+    // DB_ERR("Not implemented!");
   }
   std::optional<std::string> Get(std::string_view key) {
-    DB_ERR("Not implemented!");
+    pgid_t cur = Root();
+    uint8_t level = LevelNum()-1;
+    if (level == 0)
+    {
+      if (GetLeafPage(cur).FindSlot(key) == std::nullopt)
+      {
+        return false;
+      }
+      return LeafSlotParse(GetLeafPage(cur).FindSlot(key)).value;
+    }
+    InnerPage inn = GetInnerPage(cur);
+    while (level > 1)
+    {
+      slotid_t upper = inn.UpperBound(key);
+      if (upper == inn.SlotNum())
+      {
+        inn = GetInnerPage(GetInnerSpecial(inn));
+      }
+      else {
+        inn = GetInnerPage(InnerSlotParse(inn.Slot(upper)).next);
+        }
+      level--;
+    }
+    slotid_t upper = inn.upperBound(key);
+    if (upper == inn.SlotNum())
+      {
+        LeafPage leaf = GetLeafPage(GetInnerSpecial(inn));
+      }
+    else {
+      LeafPage leaf = GetLeafPage(InnerSlotParse(inn.Slot(upper)).next);
+      }
+    if (leaf.FindSlot(key) == std::nullopt)
+    {
+      return false;
+    }
+    return LeafSlotParse(leaf.FindSlot(key)).value;
+    // DB_ERR("Not implemented!");
   }
   // Return succeed or not.
   bool Delete(std::string_view key) {
-    DB_ERR("Not implemented!");
+    pgid_t cur = Root();
+    uint8_t level = LevelNum()-1;
+    std::stack<pgid_t> par;
+    if (level == 0)
+    {
+      if (GetLeafPage(cur).FindSlot(key) == std::nullopt)
+      {
+        return false;
+      }
+      GetLeafPage(cur).DeleteSlotByKey(key);
+      return true;
+    }
+    InnerPage inn = GetInnerPage(cur);
+    while (level > 1)
+    {
+      slotid_t upper = inn.UpperBound(key);
+      if (upper == inn.SlotNum())
+      {
+        inn = GetInnerPage(GetInnerSpecial(inn));
+      }
+      else {
+        inn = GetInnerPage(InnerSlotParse(inn.Slot(upper)).next);
+        }
+      par.push(inn.ID());
+      level--;
+    }
+    slotid_t upper = inn.upperBound(key);
+    LeafPage leaf;
+    if (upper == inn.SlotNum())
+      {
+        leaf = GetLeafPage(GetInnerSpecial(inn));
+      }
+    else {
+      leaf = GetLeafPage(InnerSlotParse(inn.Slot(upper)).next);
+      }
+    par.push(leaf.ID());
+    if (leaf.FindSlot(key) == std::nullopt)
+    {
+      return false;
+    }
+    leaf.DeleteSlotByKey(key);
+    if (leaf.SlotNum()==0)
+    {
+      pgid_t leaf_pre = GetLeafPrev(leaf);
+      pgid_t leaf_next = GetLeafNext(leaf);
+      SetLeafNext(GetLeafPage(leaf_pre), leaf_next);
+      SetLeafPrev(GetLeafPage(leaf_next), leaf_pre);
+      FreePage(std::move(leaf));
+      pgid_t pa = par.pop();
+      inn = GetInnerPage(pa);
+      slotid_t upper = inn.upperBound(key);
+      inn.DeleteSlot(upper);
+      while ((inn.SlotNum()==0) && (!par.empty()))
+      {
+        FreePage(std::move(inn));
+        pgid_t pa = par.pop();
+        inn = GetInnerPage(pa);
+        slotid_t upper = inn.upperBound(key);
+        inn.DeleteSlot(upper);
+      }
+    }
+    if (IsEmpty())
+    {
+      UpdateLevelNum(1);
+    }
+    
+    return true;
+    // DB_ERR("Not implemented!");
   }
   // Logically equivalent to firstly Get(key) then Delete(key)
   std::optional<std::string> Take(std::string_view key) {
-    DB_ERR("Not implemented!");
+    auto v = Get(key);
+    Delete(key);
+    return v;
+    // DB_ERR("Not implemented!");
   }
   // Return an iterator that iterates from the first element.
   Iter Begin() {
-    DB_ERR("Not implemented!");
+    pgid_t root = Root();
+    Iter iter = {root,0};
+    return iter;
+    // DB_ERR("Not implemented!");
   }
   // Return an iterator that points to the tuple with the minimum key
   // s.t. key >= "key" in argument
   Iter LowerBound(std::string_view key) {
-    DB_ERR("Not implemented!");
+    pgid_t cur = Root();
+    uint8_t level = LevelNum()-1;
+    if (level == 0)
+    {
+      slotid_t slot_id = GetLeafPage(cur).LowerBound(key);
+      Iter iter = {cur, slot_id};
+      return iter;
+    }
+    InnerPage inn = GetInnerPage(cur);
+    while (level > 1)
+    {
+      slotid_t upper = inn.UpperBound(key);
+      if (upper == inn.SlotNum())
+      {
+        inn = GetInnerPage(GetInnerSpecial(inn));
+      }
+      else {
+        inn = GetInnerPage(InnerSlotParse(inn.Slot(upper)).next);
+        }
+      level--;
+    }
+    slotid_t upper = inn.upperBound(key);
+    LeafPage leaf;
+    if (upper == inn.SlotNum())
+      {
+        leaf = GetLeafPage(GetInnerSpecial(inn));
+      }
+    else {
+      leaf = GetLeafPage(InnerSlotParse(inn.Slot(upper)).next);
+      }
+    slotid_t slot_id = GetLeafPage(leaf).LowerBound(key);
+    Iter iter = {cur, slot_id};
+    return iter;
+    // DB_ERR("Not implemented!");
   }
   // Return an iterator that points to the tuple with the minimum key
   // s.t. key > "key" in argument
   Iter UpperBound(std::string_view key) {
-    DB_ERR("Not implemented!");
+    pgid_t cur = Root();
+    uint8_t level = LevelNum()-1;
+    if (level == 0)
+    {
+      slotid_t slot_id = GetLeafPage(cur).UpperBound(key);
+      Iter iter = {cur, slot_id};
+      return iter;
+    }
+    InnerPage inn = GetInnerPage(cur);
+    while (level > 1)
+    {
+      slotid_t upper = inn.UpperBound(key);
+      if (upper == inn.SlotNum())
+      {
+        inn = GetInnerPage(GetInnerSpecial(inn));
+      }
+      else {
+        inn = GetInnerPage(InnerSlotParse(inn.Slot(upper)).next);
+        }
+      level--;
+    }
+    slotid_t upper = inn.upperBound(key);
+    LeafPage leaf;
+    if (upper == inn.SlotNum())
+      {
+        leaf = GetLeafPage(GetInnerSpecial(inn));
+      }
+    else {
+      leaf = GetLeafPage(InnerSlotParse(inn.Slot(upper)).next);
+      }
+    slotid_t slot_id = GetLeafPage(leaf).UpperBound(key);
+    Iter iter = {cur, slot_id};
+    return iter;
+    // DB_ERR("Not implemented!");
   }
   size_t TupleNum() {
-    DB_ERR("Not implemented!");
+    size_t sum = 0;
+    Iter beg = Begin();
+    slotid_t s1 = beg.slot_id_;
+    pgid_t p1 = beg.page_id_;
+    beg.Next();
+    slotid_t s2 = beg.slot_id_;
+    pgid_t p2 = beg.page_id_;
+    while ((s1 != s2)&& (p1 != p2))
+    {
+      s1 = s2;
+      p1 = p2;
+      beg.Next();
+      s2 = beg.slot_id_;
+      p2 = beg.page_id_;
+      sum++;
+    }
+    return sum;
+    // DB_ERR("Not implemented!");
   }
  private:
   // Here we provide some helper classes/functions that you may use.
@@ -454,6 +811,7 @@ class BPlusTree {
     InnerPage inner = GetInnerPage(pgid);
     size_t len = 0; // Suppress maybe unitialized warning
     slotid_t slot_num = inner.SlotNum();
+    assert(slot_num > 0);
     for (slotid_t i = 0; i < slot_num; ++i) {
       InnerSlot slot = InnerSlotParse(inner.Slot(i));
       if (i > 0)
