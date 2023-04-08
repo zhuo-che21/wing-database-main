@@ -93,6 +93,9 @@ class BPlusTree {
    public:
     Iter(const Iter&) = delete;
     Iter& operator=(const Iter&) = delete;
+    Iter(std::reference_wrapper<PageManager> pgm, pgid_t page_id,
+    pgid_t meta_pgid, slotid_t slot_id) :page_id_(page_id_), 
+    slot_id_(slot_id_), pgm_(pgm), meta_pgid_(meta_pgid){}
     Iter(Iter&& iter) :page_id_(iter.page_id_), slot_id_(iter.slot_id_) {
       // DB_ERR("Not implemented!");
     }
@@ -113,11 +116,12 @@ class BPlusTree {
       // DB_ERR("Not implemented!");
     }
     void Next() {
-      LeafPage leaf = GetLeafPage(page_id_);
-      if (slot_id_ >= leaf.Slotnum() )
+      BPlusTree bplus = Open(pgm_, meta_pgid_);
+      LeafPage leaf = bplus.GetLeafPage(page_id_);
+      if (slot_id_ >= leaf.SlotNum() )
       {
-        page_id_ = GetLeafNext(leaf);
-        if (GetLeafNext(leaf)==0)
+        page_id_ = bplus.GetLeafNext(leaf);
+        if (bplus.GetLeafNext(leaf)==0)
         {
           return;
         }
@@ -127,6 +131,10 @@ class BPlusTree {
       // DB_ERR("Not implemented!");
     }
    private:
+    std::reference_wrapper<PageManager> pgm_;
+    pgid_t meta_pgid_;
+    pgid_t page_id_;
+    slotid_t slot_id_;
   };
   BPlusTree(const Self&) = delete;
   Self& operator=(const Self&) = delete;
@@ -219,7 +227,7 @@ class BPlusTree {
     // DB_ERR("Not implemented!");
   }
   bool IsEmpty() {
-    return (TupleNum()==0)
+    return (TupleNum()==0);
     // DB_ERR("Not implemented!");
   }
   /* Insert only if the key does not exists.
@@ -291,7 +299,8 @@ class BPlusTree {
       char* addr;
       InnerSlotSerialize(addr, slot_next);
       // std::string_view s_next = std::string_view(addr, InnerSlotSize(slot_next));
-      auto po = par.pop();
+      auto po = par.top();
+      par.pop();
       pgid_t pa = po.first;
       uint8_t lev = po.second;
       inn = GetInnerPage(pa);
@@ -304,7 +313,7 @@ class BPlusTree {
       {
         if (lev == LevelNum()-1)
         {
-          InnerPage i_next = AllocLeafPage();
+          InnerPage i_next = AllocInnerPage();
           pgid_t i_next_id = i_next.ID();
           inn.SplitInsert(i_next,std::string_view(addr, InnerSlotSize(slot_next)),upper);
           InnerPage new_ro = AllocInnerPage();
@@ -321,7 +330,8 @@ class BPlusTree {
         }
         InnerPage next = AllocInnerPage();
         pgid_t next_id = next.ID();
-        auto po = par.pop();
+        auto po = par.top();
+        par.pop();
         uint8_t lev = po.second;
         inn.SplitInsert(next,std::string_view(addr, InnerSlotSize(slot_next)),upper);
         pgid_t ri = InnerSlotParse(next.Slot(next.SlotNum()-1)).next;
@@ -406,13 +416,14 @@ class BPlusTree {
         }
       level--;
     }
-    slotid_t upper = inn.upperBound(key);
+    slotid_t upper = inn.UpperBound(key);
+    LeafPage leaf;
     if (upper == inn.SlotNum())
       {
-        LeafPage leaf = GetLeafPage(GetInnerSpecial(inn));
+        leaf = GetLeafPage(GetInnerSpecial(inn));
       }
     else {
-      LeafPage leaf = GetLeafPage(InnerSlotParse(inn.Slot(upper)).next);
+      leaf = GetLeafPage(InnerSlotParse(inn.Slot(upper)).next);
       }
     if (leaf.FindSlot(key) == std::nullopt)
     {
@@ -449,7 +460,7 @@ class BPlusTree {
       par.push(inn.ID());
       level--;
     }
-    slotid_t upper = inn.upperBound(key);
+    slotid_t upper = inn.UpperBound(key);
     LeafPage leaf;
     if (upper == inn.SlotNum())
       {
@@ -471,16 +482,18 @@ class BPlusTree {
       SetLeafNext(GetLeafPage(leaf_pre), leaf_next);
       SetLeafPrev(GetLeafPage(leaf_next), leaf_pre);
       FreePage(std::move(leaf));
-      pgid_t pa = par.pop();
+      pgid_t pa = par.top();
+      par.pop();
       inn = GetInnerPage(pa);
-      slotid_t upper = inn.upperBound(key);
+      slotid_t upper = inn.UpperBound(key);
       inn.DeleteSlot(upper);
       while ((inn.SlotNum()==0) && (!par.empty()))
       {
         FreePage(std::move(inn));
-        pgid_t pa = par.pop();
+        pgid_t pa = par.top();
+        par.pop();
         inn = GetInnerPage(pa);
-        slotid_t upper = inn.upperBound(key);
+        slotid_t upper = inn.UpperBound(key);
         inn.DeleteSlot(upper);
       }
     }
@@ -530,7 +543,7 @@ class BPlusTree {
         }
       level--;
     }
-    slotid_t upper = inn.upperBound(key);
+    slotid_t upper = inn.UpperBound(key);
     LeafPage leaf;
     if (upper == inn.SlotNum())
       {
@@ -539,7 +552,7 @@ class BPlusTree {
     else {
       leaf = GetLeafPage(InnerSlotParse(inn.Slot(upper)).next);
       }
-    slotid_t slot_id = GetLeafPage(leaf).LowerBound(key);
+    slotid_t slot_id = leaf.LowerBound(key);
     Iter iter = {cur, slot_id};
     return iter;
     // DB_ERR("Not implemented!");
@@ -568,7 +581,7 @@ class BPlusTree {
         }
       level--;
     }
-    slotid_t upper = inn.upperBound(key);
+    slotid_t upper = inn.UpperBound(key);
     LeafPage leaf;
     if (upper == inn.SlotNum())
       {
@@ -577,7 +590,7 @@ class BPlusTree {
     else {
       leaf = GetLeafPage(InnerSlotParse(inn.Slot(upper)).next);
       }
-    slotid_t slot_id = GetLeafPage(leaf).UpperBound(key);
+    slotid_t slot_id = leaf.UpperBound(key);
     Iter iter = {cur, slot_id};
     return iter;
     // DB_ERR("Not implemented!");

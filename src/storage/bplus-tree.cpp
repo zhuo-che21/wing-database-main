@@ -4,7 +4,7 @@ namespace wing {
 
 InnerSlot InnerSlotParse(std::string_view slot) {
 	std::string s1{slot.substr(0,sizeof(pgid_t))};
-	pgid_t next = std::stoi(s1.c_str());//转成uint
+	pgid_t next = std::stoi(s1.c_str());
 	std::string_view key = slot.substr(sizeof(pgid_t));
 	InnerSlot s = {next,key};
 	return s;

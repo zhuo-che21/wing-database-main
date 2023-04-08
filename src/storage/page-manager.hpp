@@ -217,7 +217,7 @@ public:
   // Find the slot with the minimum key s.t. key >= "key" in argument.
   // If this slot doesn't exist, return SlotNum().
   slotid_t LowerBound(std::string_view key) const {
-    if IsEmpty(){
+    if (IsEmpty()){
       return SlotNum();
     }
     slotid_t start = 0;
@@ -228,7 +228,7 @@ public:
   // Find the slot with the minimum key s.t. key > "key" in argument
   // If this slot doesn't exist, return SlotNum().
   slotid_t UpperBound(std::string_view key) const {
-    if IsEmpty(){
+    if (IsEmpty()){
       return SlotNum();
     }
     slotid_t start = 0;
@@ -248,7 +248,7 @@ public:
     } else if (slot_key_comp_(mid, key) == std::weak_ordering::greater) {
       end = mid;
     } else {
-      start = mid + 1
+      start = mid + 1;
     }
   }
   return SlotNum();
@@ -267,7 +267,7 @@ public:
       } else if (slot_key_comp_(mid, key) == std::weak_ordering::greater) {
         end = mid;
       } else {
-        start = mid + 1
+        start = mid + 1;
       }
     }
   return std::nullopt;
@@ -294,11 +294,11 @@ public:
     if (!IsInsertable(slot)){
       return false;
     }
-    if (slot_comp_(slot, Slot(slotid))!=std:weak_ordering::less)
+    if (slot_comp_(slot, Slot(slotid))!=std::weak_ordering::less)
       {
         return false;
       }
-    if (slot_comp_(slot, Slot(slotid-1))!=std:weak_ordering::greater)
+    if (slot_comp_(slot, Slot(slotid-1))!=std::weak_ordering::greater)
       {
         return false;
       }
@@ -335,18 +335,18 @@ public:
   bool SplitInsert(SortedPage<SlotKeyCompare, SlotCompare>& right,
       std::string_view slot, slotid_t slotid) {
     MarkDirty();
-    if (slot_comp_(slot, Slot(slotid))!=std:weak_ordering::less)
+    if (slot_comp_(slot, Slot(slotid))!=std::weak_ordering::less)
       {
         return false;
       }
-    if (slot_comp_(slot, Slot(slotid-1))!=std:weak_ordering::greater)
+    if (slot_comp_(slot, Slot(slotid-1))!=std::weak_ordering::greater)
       {
         return false;
       }
     slotid_t start = 0;
     slotid_t end = SlotNum();
-    inline pgoff_t s1 = SlotsSpace(start, end); // Ends()[0] - Starts()[SlotNum()-1];
-    inline pgoff_t smid = (s1 + slot.size()) / 2;
+    pgoff_t s1 = SlotsSpace(start, end); // Ends()[0] - Starts()[SlotNum()-1];
+    pgoff_t smid = (s1 + slot.size()) / 2;
     slotid_t edge = 0;
     while (start != end) {
       slotid_t mid = start + (end - start) / 2;
