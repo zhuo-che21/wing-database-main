@@ -166,9 +166,8 @@ class BPlusTree {
    */
   static Self Create(std::reference_wrapper<PageManager> pgm) {
     Self ret(pgm, pgm.get().Allocate(), Compare());
-    auto root = ret.AllocLeafPage();
-    pgid_t root_id = root.ID();
-    ret.UpdateRoot(root_id);
+    LeafPage root = ret.AllocLeafPage();
+    ret.UpdateRoot(root.ID());
     ret.UpdateLevelNum(1);
     ret.UpdateTupleNum(0);
     // Initialize the tree here.
