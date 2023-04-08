@@ -222,7 +222,8 @@ public:
     }
     slotid_t start = 0;
     slotid_t end = SlotNum();
-    return LowerBoundAddable(start, end, key, slot_key_comp_);
+    ComparePageOffKey page_key_comp(page_, slot_key_comp_);
+    return LowerBoundAddable(start, end, key, page_key_comp);
     // DB_ERR("Not implemented yet!");
   }
   // Find the slot with the minimum key s.t. key > "key" in argument
@@ -233,7 +234,8 @@ public:
     }
     slotid_t start = 0;
     slotid_t end = SlotNum();
-    return UpperBoundAddable(start, end, key, slot_key_comp_);
+    ComparePageOffKey page_key_comp(page_, slot_key_comp_);
+    return UpperBoundAddable(start, end, key, page_key_comp);
     // DB_ERR("Not implemented yet!");
   }
   // Find the key and return the slot ID.
@@ -241,11 +243,12 @@ public:
   slotid_t Find(std::string_view key) const {
     slotid_t start = 0;
     slotid_t end = SlotNum();
+    ComparePageOffKey page_key_comp(page_, slot_key_comp_);
     while (start != end) {
     slotid_t mid = start + (end - start) / 2;
-    if (slot_key_comp_(mid, key) == std::weak_ordering::equivalent) {
+    if (page_key_comp(&Starts()[mid], key) == std::weak_ordering::equivalent) {
       return mid;
-    } else if (slot_key_comp_(mid, key) == std::weak_ordering::greater) {
+    } else if (page_key_comp(&Starts()[mid], key) == std::weak_ordering::greater) {
       end = mid;
     } else {
       start = mid + 1;
