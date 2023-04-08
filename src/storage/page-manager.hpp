@@ -220,10 +220,18 @@ public:
     if (IsEmpty()){
       return SlotNum();
     }
+    ComparePageOffKey page_key_comp(page_, slot_key_comp_);
     slotid_t start = 0;
     slotid_t end = SlotNum();
-    ComparePageOffKey page_key_comp(page_, slot_key_comp_);
-    return LowerBoundAddable(start, end, key, page_key_comp);
+    while (start != end) {
+    slotid_t mid = start + (end - start) / 2;
+    if (page_key_comp(&Starts()[mid],key) == std::weak_ordering::less) {
+      start = mid + 1;
+    } else {
+      end = mid;
+    }
+  }
+  return start;
     // DB_ERR("Not implemented yet!");
   }
   // Find the slot with the minimum key s.t. key > "key" in argument
@@ -232,10 +240,18 @@ public:
     if (IsEmpty()){
       return SlotNum();
     }
+    ComparePageOffKey page_key_comp(page_, slot_key_comp_);
     slotid_t start = 0;
     slotid_t end = SlotNum();
-    ComparePageOffKey page_key_comp(page_, slot_key_comp_);
-    return UpperBoundAddable(start, end, key, page_key_comp);
+    while (start != end) {
+    slotid_t mid = start + (end - start) / 2;
+    if (page_key_comp(&Starts()[mid],key) == std::weak_ordering::greater) {
+      end = mid;
+    } else {
+      start = mid + 1;
+    }
+  }
+  return start;
     // DB_ERR("Not implemented yet!");
   }
   // Find the key and return the slot ID.
