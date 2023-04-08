@@ -168,9 +168,55 @@ class BPlusTree {
   // to reopen the B+tree with it in the future.
   inline pgid_t MetaPageID() const { return meta_pgid_; }
   // Free on-disk resources including the meta page.
-  void Destroy() {
-    
-    DB_ERR("Not implemented!");
+  void Destroy() { pgid_t root = Root();
+    std::stack<pgid_t> p_stack;
+    p_stack.push(root);
+    uint8_t level = LevelNum()-1;
+    if (level == 0)
+    {
+      FreePage(std::move(GetLeafPage(root)));
+      FreePage(std::move(GetMetaPage()));
+    }
+    else{
+      InnerPage cur = GetInnerPage(root);
+      LeafPage leaf;
+      while (1)
+      {
+        if (cur.SlotNum() != 0)
+        {
+          pgid_t s = InnerSlotParse(cur.Slot(0)).next;
+          if (level > 1)
+          {
+            level--;
+            cur = GetInnerPage(s);
+            p_stack.push(cur.ID());
+          } else {
+            leaf = GetLeafPage(s);
+            FreePage(std::move(leaf));
+            cur.DeleteSlot(0);
+          }
+        } else {
+          pgid_t spa = GetInnerSpecial(cur);
+          if (level > 1)
+          {
+            FreePage(std::move(GetInnerPage(spa)));
+          } else {
+            FreePage(std::move(GetLeafPage(spa)));
+          }
+          FreePage(std::move(cur));
+          p_stack.pop();
+          if (p_stack.empty())
+          {
+            break;
+          }
+          cur = GetInnerPage(p_stack.top());
+          cur.DeleteSlot(0);
+          level++;        
+        }
+      }
+      FreePage(std::move(GetMetaPage()));
+    }
+    // DB_ERR("Not implemented!");
   }
   bool IsEmpty() {
     return (TupleNum()==0)
