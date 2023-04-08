@@ -108,9 +108,10 @@ class BPlusTree {
     // Returns an optional key-value pair. The first std::string_view is the key
     // and the second std::string_view is the value.
     std::optional<std::pair<std::string_view, std::string_view>> Cur() {
-      LeafPage leaf_p = GetLeafPage(page_id_);
+      BPlusTree bplus = Open(pgm_, meta_pgid_);
+      LeafPage leaf_p = bplus.GetLeafPage(page_id_);
       std::string_view content = leaf_p.Slot(slot_id_);
-      LeafSlot s = LeafSlotParse(content);
+      LeafSlot s = bplus.LeafSlotParse(content);
       return std::make_optional(std::make_pair(s.key, s.value));
       // return std::make_optional(s);
       // DB_ERR("Not implemented!");
@@ -129,6 +130,12 @@ class BPlusTree {
       }
       slot_id_ = slot_id_ + 1;
       // DB_ERR("Not implemented!");
+    }
+    pgid_t Page_id() {
+      return page_id_;
+    }
+    slotid_t Slot_id() {
+      return slot_id_;
     }
    private:
     std::reference_wrapper<PageManager> pgm_;
@@ -187,7 +194,7 @@ class BPlusTree {
     }
     else{
       InnerPage cur = GetInnerPage(root);
-      LeafPage leaf;
+      pgid_t leaf_id;
       while (1)
       {
         if (cur.SlotNum() != 0)
@@ -199,8 +206,8 @@ class BPlusTree {
             cur = GetInnerPage(s);
             p_stack.push(cur.ID());
           } else {
-            leaf = GetLeafPage(s);
-            FreePage(std::move(leaf));
+            leaf_id = GetLeafPage(s).ID();
+            FreePage(std::move(GetLeafPage(leaf_id)));
             cur.DeleteSlot(0);
           }
         } else {
@@ -250,7 +257,8 @@ class BPlusTree {
       }
       LeafPage l_next = AllocLeafPage();
       pgid_t l_next_id = l_next.ID();
-      SetLeafPrev(GetLeafPage(cur),l_next_id);
+      LeafPage cur_page = GetLeafPage(cur);
+      SetLeafPrev(cur_page ,l_next_id);
       SetLeafNext(l_next, cur);
       GetLeafPage(cur).SplitInsert(l_next,s,slot_id);
       InnerPage ro = AllocInnerPage();
@@ -382,12 +390,12 @@ class BPlusTree {
     {
       pgid_t root = Root();
       LeafPage r = GetLeafPage(root);
-      return LeafLargestKey(r);
+      return std::make_optional(LeafLargestKey(r));
     }
     else {
       pgid_t root = Root();
       pgid_t l = LargestLeaf(GetInnerPage(root),LevelNum()-1);
-      return LeafLargestKey(GetLeafPage(l));
+      return std::make_optional(LeafLargestKey(GetLeafPage(l)));
     }
     
     // DB_ERR("Not implemented!");
@@ -397,11 +405,12 @@ class BPlusTree {
     uint8_t level = LevelNum()-1;
     if (level == 0)
     {
-      if (GetLeafPage(cur).FindSlot(key) == std::nullopt)
-      {
-        return false;
-      }
+      if (GetLeafPage(cur).FindSlot(key).has_value())
+    {
       return LeafSlotParse(GetLeafPage(cur).FindSlot(key)).value;
+    } else {
+      return std::nullopt;
+    }
     }
     InnerPage inn = GetInnerPage(cur);
     while (level > 1)
@@ -417,7 +426,7 @@ class BPlusTree {
       level--;
     }
     slotid_t upper = inn.UpperBound(key);
-    LeafPage leaf;
+    LeafPage leaf = GetLeafPage(GetInnerSpecial(inn));
     if (upper == inn.SlotNum())
       {
         leaf = GetLeafPage(GetInnerSpecial(inn));
@@ -425,11 +434,12 @@ class BPlusTree {
     else {
       leaf = GetLeafPage(InnerSlotParse(inn.Slot(upper)).next);
       }
-    if (leaf.FindSlot(key) == std::nullopt)
+    if (leaf.FindSlot(key).has_value())
     {
-      return false;
+      return LeafSlotParse(leaf.FindSlot(key)).value;
+    } else {
+      return std::nullopt;
     }
-    return LeafSlotParse(leaf.FindSlot(key)).value;
     // DB_ERR("Not implemented!");
   }
   // Return succeed or not.
@@ -461,7 +471,7 @@ class BPlusTree {
       level--;
     }
     slotid_t upper = inn.UpperBound(key);
-    LeafPage leaf;
+    LeafPage leaf = GetLeafPage(GetInnerSpecial(inn));
     if (upper == inn.SlotNum())
       {
         leaf = GetLeafPage(GetInnerSpecial(inn));
@@ -479,8 +489,10 @@ class BPlusTree {
     {
       pgid_t leaf_pre = GetLeafPrev(leaf);
       pgid_t leaf_next = GetLeafNext(leaf);
-      SetLeafNext(GetLeafPage(leaf_pre), leaf_next);
-      SetLeafPrev(GetLeafPage(leaf_next), leaf_pre);
+      LeafPage leaf_page_pre = GetLeafPage(leaf_pre);
+      LeafPage leaf_page_next = GetLeafPage(leaf_next);
+      SetLeafNext(leaf_page_pre, leaf_next);
+      SetLeafPrev(leaf_page_next, leaf_pre);
       FreePage(std::move(leaf));
       pgid_t pa = par.top();
       par.pop();
@@ -515,7 +527,7 @@ class BPlusTree {
   // Return an iterator that iterates from the first element.
   Iter Begin() {
     pgid_t root = Root();
-    Iter iter = {root,0};
+    Iter iter = {pgm_,root,meta_pgid_,0};
     return iter;
     // DB_ERR("Not implemented!");
   }
@@ -544,7 +556,7 @@ class BPlusTree {
       level--;
     }
     slotid_t upper = inn.UpperBound(key);
-    LeafPage leaf;
+    LeafPage leaf = GetLeafPage(GetInnerSpecial(inn));
     if (upper == inn.SlotNum())
       {
         leaf = GetLeafPage(GetInnerSpecial(inn));
@@ -553,7 +565,7 @@ class BPlusTree {
       leaf = GetLeafPage(InnerSlotParse(inn.Slot(upper)).next);
       }
     slotid_t slot_id = leaf.LowerBound(key);
-    Iter iter = {cur, slot_id};
+    Iter iter = {pgm_,cur,meta_pgid_,slot_id};
     return iter;
     // DB_ERR("Not implemented!");
   }
@@ -582,7 +594,7 @@ class BPlusTree {
       level--;
     }
     slotid_t upper = inn.UpperBound(key);
-    LeafPage leaf;
+    LeafPage leaf = GetLeafPage(GetInnerSpecial(inn));
     if (upper == inn.SlotNum())
       {
         leaf = GetLeafPage(GetInnerSpecial(inn));
@@ -591,25 +603,25 @@ class BPlusTree {
       leaf = GetLeafPage(InnerSlotParse(inn.Slot(upper)).next);
       }
     slotid_t slot_id = leaf.UpperBound(key);
-    Iter iter = {cur, slot_id};
+    Iter iter = {pgm_, cur, meta_pgid_, slot_id};
     return iter;
     // DB_ERR("Not implemented!");
   }
   size_t TupleNum() {
     size_t sum = 0;
     Iter beg = Begin();
-    slotid_t s1 = beg.slot_id_;
-    pgid_t p1 = beg.page_id_;
+    slotid_t s1 = beg.Slot_id();
+    pgid_t p1 = beg.Slot_id();
     beg.Next();
-    slotid_t s2 = beg.slot_id_;
-    pgid_t p2 = beg.page_id_;
-    while ((s1 != s2)&& (p1 != p2))
+    slotid_t s2 = beg.Slot_id();
+    pgid_t p2 = beg.Page_id();
+    while ((s1 != s2) && (p1 != p2))
     {
       s1 = s2;
       p1 = p2;
       beg.Next();
-      s2 = beg.slot_id_;
-      p2 = beg.page_id_;
+      s2 = beg.Slot_id();
+      p2 = beg.Page_id();
       sum++;
     }
     return sum;
