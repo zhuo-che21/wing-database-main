@@ -407,7 +407,7 @@ class BPlusTree {
     {
       if (GetLeafPage(cur).FindSlot(key).has_value())
     {
-      return std::string{LeafSlotParse(GetLeafPage(cur).FindSlot(key)).value};
+      return std::string{LeafSlotParse(GetLeafPage(cur).FindSlot(key).value()).value};
     } else {
       return std::nullopt;
     }
@@ -436,7 +436,7 @@ class BPlusTree {
       }
     if (leaf.FindSlot(key).has_value())
     {
-      return std::{LeafSlotParse(leaf.FindSlot(key)).value};
+      return std::string{LeafSlotParse(leaf.FindSlot(key)).value};
     } else {
       return std::nullopt;
     }
