@@ -91,12 +91,12 @@ class BPlusTree {
  public:
   class Iter {
    public:
-    Iter(const Iter&) = delete;
-    Iter& operator=(const Iter&) = delete;
     Iter(std::reference_wrapper<PageManager> pgm, pgid_t page_id,
     pgid_t meta_pgid, slotid_t slot_id) :page_id_(page_id_), 
     slot_id_(slot_id_), pgm_(pgm), meta_pgid_(meta_pgid){}
-    Iter(Iter&& iter) :page_id_(iter.page_id_), slot_id_(iter.slot_id_) {
+    Iter(const Iter&) = delete;
+    Iter& operator=(const Iter&) = delete;
+    Iter(Iter&& iter) :page_id_(iter.page_id_), slot_id_(iter.slot_id_), pgm_(iter.pgm_), meta_pgid_(iter.meta_pgid_) {
       // DB_ERR("Not implemented!");
     }
     Iter& operator=(Iter&& iter) {
