@@ -259,12 +259,13 @@ public:
   // If the key is not found, return std::nullopt.
   std::optional<std::string_view> FindSlot(std::string_view key) const {
     slotid_t start = 0;
+    ComparePageOffKey page_key_comp;
     slotid_t end = SlotNum();
     while (start != end) {
       slotid_t mid = start + (end - start) / 2;
-      if (slot_key_comp_(mid, key) == std::weak_ordering::equivalent) {
+      if (page_key_comp(Starts()[mid], key) == std::weak_ordering::equivalent) {
         return Slot(mid);
-      } else if (slot_key_comp_(mid, key) == std::weak_ordering::greater) {
+      } else if (page_key_comp(Starts()[mid], key) == std::weak_ordering::greater) {
         end = mid;
       } else {
         start = mid + 1;
