@@ -111,7 +111,7 @@ class BPlusTree {
       BPlusTree bplus = Open(pgm_, meta_pgid_);
       LeafPage leaf_p = bplus.GetLeafPage(page_id_);
       std::string_view content = leaf_p.Slot(slot_id_);
-      LeafSlot s = bplus.LeafSlotParse(content);
+      LeafSlot s = LeafSlotParse(content);
       return std::make_optional(std::make_pair(s.key, s.value));
       // return std::make_optional(s);
       // DB_ERR("Not implemented!");
@@ -390,12 +390,12 @@ class BPlusTree {
     {
       pgid_t root = Root();
       LeafPage r = GetLeafPage(root);
-      return std::make_optional(LeafLargestKey(r));
+      return std::string{LeafLargestKey(r)};
     }
     else {
       pgid_t root = Root();
       pgid_t l = LargestLeaf(GetInnerPage(root),LevelNum()-1);
-      return std::make_optional(LeafLargestKey(GetLeafPage(l)));
+      return std::string{LeafLargestKey(GetLeafPage(l))};
     }
     
     // DB_ERR("Not implemented!");
@@ -407,7 +407,7 @@ class BPlusTree {
     {
       if (GetLeafPage(cur).FindSlot(key).has_value())
     {
-      return LeafSlotParse(GetLeafPage(cur).FindSlot(key)).value;
+      return std::string{LeafSlotParse(GetLeafPage(cur).FindSlot(key)).value};
     } else {
       return std::nullopt;
     }
@@ -436,7 +436,7 @@ class BPlusTree {
       }
     if (leaf.FindSlot(key).has_value())
     {
-      return LeafSlotParse(leaf.FindSlot(key)).value;
+      return std::{LeafSlotParse(leaf.FindSlot(key)).value};
     } else {
       return std::nullopt;
     }
@@ -539,7 +539,7 @@ class BPlusTree {
     if (level == 0)
     {
       slotid_t slot_id = GetLeafPage(cur).LowerBound(key);
-      Iter iter = {cur, slot_id};
+      Iter iter = {pgm_, cur, meta_pgid_, slot_id};
       return iter;
     }
     InnerPage inn = GetInnerPage(cur);
@@ -577,7 +577,7 @@ class BPlusTree {
     if (level == 0)
     {
       slotid_t slot_id = GetLeafPage(cur).UpperBound(key);
-      Iter iter = {cur, slot_id};
+      Iter iter = {pgm_, cur, meta_pgid_, slot_id};
       return iter;
     }
     InnerPage inn = GetInnerPage(cur);
