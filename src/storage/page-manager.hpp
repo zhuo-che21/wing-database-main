@@ -259,7 +259,7 @@ public:
   // If the key is not found, return std::nullopt.
   std::optional<std::string_view> FindSlot(std::string_view key) const {
     slotid_t start = 0;
-    ComparePageOffKey page_key_comp;
+    ComparePageOffKey page_key_comp(page_, slot_key_comp_);
     slotid_t end = SlotNum();
     while (start != end) {
       slotid_t mid = start + (end - start) / 2;
